@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+
+<beans xmlns="http://www.springframework.org/schema/beans" xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:neo4j="http://www.springframework.org/schema/data/neo4j"
+	xmlns:tx="http://www.springframework.org/schema/tx" xmlns:task="http://www.springframework.org/schema/task"
+	xmlns:aop="http://www.springframework.org/schema/aop" xmlns:jpa="http://www.springframework.org/schema/data/jpa"
+	xmlns:jdbc="http://www.springframework.org/schema/jdbc"
+	xsi:schemaLocation="http://www.springframework.org/schema/jdbc http://www.springframework.org/schema/jdbc/spring-jdbc-3.2.xsd
+		http://www.springframework.org/schema/aop http://www.springframework.org/schema/aop/spring-aop-3.2.xsd
+		http://www.springframework.org/schema/task http://www.springframework.org/schema/task/spring-task-3.2.xsd
+		http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.2.xsd
+		http://www.springframework.org/schema/data/jpa http://www.springframework.org/schema/data/jpa/spring-jpa-1.2.xsd
+		http://www.springframework.org/schema/data/neo4j http://www.springframework.org/schema/data/neo4j/spring-neo4j-2.1.xsd
+		http://www.springframework.org/schema/tx http://www.springframework.org/schema/tx/spring-tx-3.2.xsd
+		http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-3.2.xsd">
+
+	<context:spring-configured/>
+	<context:annotation-config/>
+	<context:component-scan base-package="matt" />
+
+	<!--  Neo4j database — embedded or REST by configuration -->
+	<bean id="graphDatabaseService" class="org.neo4j.kernel.EmbeddedGraphDatabase" destroy-method="shutdown">
+		<constructor-arg index="0" value="target/neo4j-db"/>
+	</bean>
+	<neo4j:config graphDatabaseService="graphDatabaseService" />
+
+	<!-- This adds an embedded server with WebConsole, so the CI Test Runner can access
+	the database another way to verify responses. -->
+	<!--bean id="serverWrapper" class="org.neo4j.server.WrappingNeoServerBootstrapper" init-method="start" destroy-method="stop">
+		<constructor-arg ref="graphDatabaseService" />
+	</bean-->
+
+	<!-- This adds the WrappingNeoServerBootstrapper, but only if the underlying graphDatabaseService is embedded -->
+<!-- 	<bean id="neo4jEmbeddedRestServer" class="org.kew.shs.namesbackbone.persistent.repository.ConfiguredNeo4jRestServer" destroy-method="stop"> -->
+<!-- 		<constructor-arg ref="graphDatabaseService" index="0"/> -->
+<!-- 		<constructor-arg value="${neo4j.restPort}" index="1"/> -->
+<!-- 	</bean> -->
+
+	<!-- This tells SpringDataNeo4j that repository classes are found in this 
+	package. Normal practice is to have a repository per domain class.
+	The NameRepository is used in the example App class, and is received 
+	from the Spring context.
+	-->
+	<neo4j:repositories base-package="matt.graphrepo"/>
+
+	<!-- Relational database -->
+	<bean class="org.springframework.orm.jpa.support.PersistenceAnnotationBeanPostProcessor" />
+
+	<!--bean id="entityManagerFactory" class="org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean">
+		<property name="dataSource" ref="dataSource" />
+		<property name="jpaVendorAdapter" ref="jpaAdapter" />
+		<property name="loadTimeWeaver">
+			<bean class="org.springframework.instrument.classloading.InstrumentationLoadTimeWeaver" />
+		</property>
+		<property name="persistenceUnitName" value="metadataTest" />
+		<property name="packagesToScan">
+			<list>
+				<value>org.kew.ncb.persistent.metadata</value>
+			</list>
+		</property>
+		<property name="jpaProperties">
+			<props>
+				<prop key="hibernate.hbm2ddl.auto">create</prop>
+				<prop key="hibernate.show_sql">true</prop>
+				<prop key="hibernate.format_sql">true</prop>
+			</props>
+		</property>
+	</bean>
+
+	<bean id="jpaAdapter" class="org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter">
+		<property name="database" value="HSQL" />
+		<property name="showSql" value="true" />
+		<property name="generateDdl" value="true" />
+	</bean>
+
+	<bean id="jpaTransactionManager" class="org.springframework.orm.jpa.JpaTransactionManager">
+		<property name="entityManagerFactory" ref="entityManagerFactory" />
+	</bean>
+
+	<jpa:repositories base-package="org.kew.ncb.repository.metadata" entity-manager-factory-ref="entityManagerFactory" transaction-manager-ref="jpaTransactionManager"/>
+
+	<jdbc:embedded-database id="dataSource" type="HSQL"/-->
+
+	<!-- Joint transaction manager -->
+	<bean id="jtaTransactionManager" class="org.springframework.transaction.jta.JtaTransactionManager">
+		<property name="transactionManager">
+			<bean class="org.neo4j.kernel.impl.transaction.SpringTransactionManager">
+				<constructor-arg ref="graphDatabaseService" />
+			</bean>
+		</property>
+		<property name="userTransaction">
+			<bean class="org.neo4j.kernel.impl.transaction.UserTransactionImpl">
+				<constructor-arg ref="graphDatabaseService" />
+			</bean>
+		</property>
+	</bean>
+
+	<!--  
+	This activates processing of the @Transactional annotation, used 
+	to define that a method must run within a transaction. See e.g.
+	org.kew.shs.namesbackbone.persistent.repository.NameRepositoryImpl.persistName
+	-->
+	<!--bean id="transactionManager" class="org.springframework.data.neo4j.transaction.ChainedTransactionManager">
+		<constructor-arg>
+			<list>
+				<ref bean="jpaTransactionManager" />
+				<ref bean="jtaTransactionManager" />
+			</list>
+		</constructor-arg>
+	</bean-->
+
+	<tx:annotation-driven mode="aspectj" transaction-manager="jtaTransactionManager"/> <!--  does this need a prefix? -->
+</beans>
